@@ -341,12 +341,19 @@ certificaba el cierre).
 
 ## Despliegue en AWS
 
-> **Nota honesta:** la infraestructura está definida y lista, pero **este proyecto
-> no se desplegó**: el equipo donde se desarrolló no tiene credenciales de AWS ni
-> AWS CLI instalado. Por eso el apartado "URLs de prueba" del enunciado queda
-> pendiente. Lo que sí está verificado de forma equivalente: el flujo completo
-> corriendo contra **DynamoDB real** (DynamoDB Local) y el **handler de Lambda**
-> ejercitado con eventos de API Gateway v2 en las pruebas de integración.
+> **Nota honesta:** la infraestructura está definida y empaquetada, pero **este
+> proyecto no se desplegó**: la máquina donde se desarrolló no tiene credenciales
+> de AWS. Por eso el apartado "URLs de prueba" del enunciado queda pendiente.
+>
+> Lo que sí está verificado, que es todo lo que se puede verificar sin una cuenta:
+>
+> - `sam validate --lint` → la plantilla es válida.
+> - `sam build` → el empaquetado funciona: compila TypeScript, instala solo
+>   dependencias de producción y deja el handler en su ruta.
+> - El **handler de Lambda** ejercitado con eventos reales de API Gateway v2
+>   (incluida la respuesta del PDF en base64) en las pruebas de integración.
+> - El flujo completo corriendo contra **DynamoDB de verdad** (DynamoDB Local),
+>   con transacciones, índices y bloqueo optimista.
 
 ```bash
 cd infra
@@ -379,6 +386,12 @@ Lo que crea [`infra/template.yaml`](infra/template.yaml):
 El empaquetado usa `BuildMethod: makefile` ([`backend/Makefile`](backend/Makefile)):
 compila TypeScript, instala solo dependencias de producción y descarta Express y el
 entrypoint local, que no viajan a la Lambda.
+
+El paquete resultante pesa ~43 MB sin comprimir, de los que ~21 MB son el SDK de
+AWS. El runtime de Node lo trae incorporado y se podría excluir, pero se
+empaqueta a propósito: así la versión del SDK queda fijada por el
+`package-lock.json` y no cambia bajo los pies cuando AWS actualiza el runtime. El
+límite de Lambda son 250 MB descomprimidos.
 
 **Step Functions** no se usó: el flujo no tiene orquestación de larga duración ni
 pasos que coordinar entre servicios. Cada acción del aprobador es una transacción
