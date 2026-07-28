@@ -14,7 +14,19 @@ webpack 5.
 | Backend | TypeScript · Node 20+ · pdfkit · AWS SDK v3 · Jest |
 | Frontend | React 18 · React Router 6 · axios · webpack 5 (Module Federation) · Testing Library |
 | Infraestructura | AWS SAM: Lambda + API Gateway (HTTP API) + DynamoDB + S3 |
-| Pruebas | **201 backend** (98 % líneas) · **66 frontend** (91 % líneas) — mínimo pedido: 60 % |
+| Pruebas | **204 backend** (98 % líneas) · **66 frontend** (91 % líneas) — mínimo pedido: 60 % |
+
+## Desplegado y funcionando
+
+| | |
+|---|---|
+| **Aplicación** | http://aprobaciones-frontend-dev-779715474515.s3-website-us-east-1.amazonaws.com |
+| **API** | https://gt8jx5d8dk.execute-api.us-east-1.amazonaws.com/dev |
+| Región | `us-east-1` · cuenta `779715474515` |
+
+Para recorrer el flujo: cree una solicitud, abra *Ver correos simulados* en el
+detalle y copie el enlace de un aprobador. El OTP aparece en pantalla porque el
+stack está desplegado con `ExponerOtp=true`.
 
 ![Panel del solicitante](docs/capturas/panel.png)
 
@@ -306,7 +318,7 @@ cd frontend && npm run test:cobertura
 
 | | Pruebas | Sentencias | Ramas | Líneas |
 |---|---|---|---|---|
-| Backend | 201 | 98 % | 81 % | 98 % |
+| Backend | 204 | 98 % | 81 % | 98 % |
 | Frontend | 66 | 91 % | 83 % | 91 % |
 
 El umbral configurado es el 60 % que pide el enunciado; el dominio y la capa de
@@ -341,36 +353,60 @@ certificaba el cierre).
 
 ## Despliegue en AWS
 
-> **Nota honesta:** la infraestructura está definida y empaquetada, pero **este
-> proyecto no se desplegó**: la máquina donde se desarrolló no tiene credenciales
-> de AWS. Por eso el apartado "URLs de prueba" del enunciado queda pendiente.
->
-> Lo que sí está verificado, que es todo lo que se puede verificar sin una cuenta:
->
-> - `sam validate --lint` → la plantilla es válida.
-> - `sam build` → el empaquetado funciona: compila TypeScript, instala solo
->   dependencias de producción y deja el handler en su ruta.
-> - El **handler de Lambda** ejercitado con eventos reales de API Gateway v2
->   (incluida la respuesta del PDF en base64) en las pruebas de integración.
-> - El flujo completo corriendo contra **DynamoDB de verdad** (DynamoDB Local),
->   con transacciones, índices y bloqueo optimista.
+Desplegado en la cuenta `779715474515`, región `us-east-1`:
+
+| Recurso | Valor |
+|---|---|
+| API (API Gateway + Lambda) | https://gt8jx5d8dk.execute-api.us-east-1.amazonaws.com/dev |
+| Frontend (S3 website) | http://aprobaciones-frontend-dev-779715474515.s3-website-us-east-1.amazonaws.com |
+| Tabla DynamoDB | `aprobaciones-dev` |
+| Bucket de evidencias | `aprobaciones-evidencias-dev-779715474515` |
+| Stacks | `aprobaciones-firma-digital`, `aprobaciones-frontend` |
+
+Verificado en la nube de punta a punta: creación de la solicitud, los tres OTP,
+las tres firmas encadenadas, generación del PDF en S3 y descarga por la API.
+
+> **Sobre el frontend:** debería ir tras CloudFront con Origin Access Control
+> —HTTPS, CDN y bucket privado— y así estaba escrito primero. La cuenta usada es
+> nueva y AWS exige verificarla con soporte antes de permitir distribuciones de
+> CloudFront, de modo que se desplegó como sitio web estático de S3, que es HTTP.
+> La plantilla con CloudFront está lista en
+> [`infra/frontend-cloudfront.yaml`](infra/frontend-cloudfront.yaml) y se puede
+> aplicar en cuanto la cuenta quede habilitada. Efecto secundario de S3 website: las rutas
+> profundas (`/approve`) devuelven el `index.html` con estado HTTP 404; el
+> navegador las renderiza bien y la SPA funciona, pero el código no es 200.
+
+Para reproducirlo desde cero, con credenciales configuradas (`aws configure`):
 
 ```bash
-cd infra
-sam build
-sam deploy --guided \
-  --parameter-overrides Etapa=dev UrlBaseFrontend=https://mi-frontend ExponerOtp=false
+cd infra && sam build && sam deploy
 ```
 
-`sam deploy` imprime `UrlApi`. Con esa URL se compila el frontend:
+`samconfig.toml` ya fija stack, región y parámetros, así que no hace falta el
+modo `--guided`. La salida incluye `UrlApi`. Después, el hospedaje del frontend:
+
+```bash
+aws cloudformation deploy --template-file infra/frontend.yaml --stack-name aprobaciones-frontend --parameter-overrides Etapa=dev
+```
+
+Con las dos URL ya conocidas se compilan y suben los tres bundles:
 
 ```bash
 cd frontend
-API_URL=https://xxxx.execute-api.us-east-1.amazonaws.com/dev npm run build
+API_URL=<UrlApi> URL_MF_SOLICITANTE=<UrlFrontend>/solicitante URL_MF_APROBADOR=<UrlFrontend>/aprobador npm run build
+aws s3 sync packages/host/dist          s3://<bucket>/             --delete --exclude "solicitante/*" --exclude "aprobador/*"
+aws s3 sync packages/mf-solicitante/dist s3://<bucket>/solicitante/ --delete
+aws s3 sync packages/mf-aprobador/dist   s3://<bucket>/aprobador/   --delete
 ```
 
-Y se publican los tres `dist/` (host y remotos) en S3 + CloudFront, pasando al host
-`URL_MF_SOLICITANTE` y `URL_MF_APROBADOR` con sus URL definitivas.
+Y por último se reapunta el stack de la API al frontend, para que los enlaces del
+correo y CORS usen el dominio definitivo:
+
+```bash
+cd infra && sam deploy --parameter-overrides "Etapa=dev UrlBaseFrontend=<UrlFrontend> ExponerOtp=true"
+```
+
+En un entorno real, `ExponerOtp=false`.
 
 Lo que crea [`infra/template.yaml`](infra/template.yaml):
 
@@ -444,11 +480,11 @@ Lo que el enunciado no fijaba y hubo que decidir:
 
 Por alcance, no por olvido:
 
-- **Despliegue efectivo en AWS** y sus URLs de prueba (ver la nota arriba).
 - **Autenticación y autorización** de usuarios reales.
 - **Correo real.** El envío está simulado, como permite el enunciado. Cambiarlo
   es escribir un adaptador de `NotificadorPort` con SES; los casos de uso no se
   tocan.
+- **CloudFront delante del frontend** (pendiente de que AWS verifique la cuenta).
 - **Firma criptográfica con certificados** (PKI, X.509, sellado de tiempo
   cualificado). La cadena SHA-256 da integridad y orden verificables, que es lo
   que el ejercicio pide; no equivale a una firma electrónica cualificada.

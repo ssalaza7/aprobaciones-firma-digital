@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { comandoValido } from '../dobles/dobles';
+import { rutaSinEtapa } from '../../src/infrastructure/adapter/in/lambda/handler';
 
 /**
  * El handler de Lambda comparte enrutador y controladores con el servidor
@@ -31,7 +32,12 @@ describe('Handler de AWS Lambda', () => {
   const evento = (
     metodo: string,
     ruta: string,
-    opciones: { cuerpo?: unknown; query?: Record<string, string>; base64?: boolean } = {},
+    opciones: {
+      cuerpo?: unknown;
+      query?: Record<string, string>;
+      base64?: boolean;
+      etapa?: string;
+    } = {},
   ): APIGatewayProxyEventV2 => {
     const cuerpo = opciones.cuerpo === undefined ? undefined : JSON.stringify(opciones.cuerpo);
     return {
@@ -40,7 +46,7 @@ describe('Handler de AWS Lambda', () => {
       rawQueryString: '',
       headers: { origin: 'https://app.pruebas.local' },
       queryStringParameters: opciones.query,
-      requestContext: { http: { method: metodo } },
+      requestContext: { http: { method: metodo }, stage: opciones.etapa ?? '$default' },
       body: opciones.base64 && cuerpo ? Buffer.from(cuerpo).toString('base64') : cuerpo,
       isBase64Encoded: Boolean(opciones.base64),
     } as unknown as APIGatewayProxyEventV2;
@@ -136,5 +142,29 @@ describe('Handler de AWS Lambda', () => {
 
   it('devuelve 404 en rutas desconocidas', async () => {
     expect((await handler(evento('GET', '/api/inexistente'))).statusCode).toBe(404);
+  });
+
+  describe('prefijo del stage en la ruta', () => {
+    // Con un stage con nombre, API Gateway entrega rawPath como "/dev/api/salud".
+    // Sin quitar ese prefijo, ninguna ruta coincide y todo responde 404.
+    it('resuelve la ruta aunque venga con el stage delante', async () => {
+      const respuesta = await handler(
+        evento('GET', '/dev/api/salud', { etapa: 'dev' }),
+      );
+      expect(respuesta.statusCode).toBe(200);
+      expect(JSON.parse(respuesta.body as string)).toEqual({ estado: 'OK' });
+    });
+
+    it('sigue funcionando con el stage $default, que no añade prefijo', async () => {
+      expect((await handler(evento('GET', '/api/salud'))).statusCode).toBe(200);
+    });
+
+    it('no confunde una ruta que empieza igual que el stage', () => {
+      expect(rutaSinEtapa('/dev/api/salud', 'dev')).toBe('/api/salud');
+      expect(rutaSinEtapa('/developer/api', 'dev')).toBe('/developer/api');
+      expect(rutaSinEtapa('/dev', 'dev')).toBe('/');
+      expect(rutaSinEtapa('/api/salud', '$default')).toBe('/api/salud');
+      expect(rutaSinEtapa('/api/salud', undefined)).toBe('/api/salud');
+    });
   });
 });

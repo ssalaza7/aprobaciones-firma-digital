@@ -1,0 +1,109 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Hospedaje de los microfrontends con CloudFront sobre un bucket S3 privado.
+
+  Es la versión correcta para producción —HTTPS, CDN y el origen sin exponer— y
+  reemplaza a `frontend.yaml`, que sirve el bucket como sitio web estático por
+  HTTP. No se usó en el despliegue porque la cuenta es nueva y CloudFront exige
+  verificación previa de AWS Support:
+
+    Your account must be verified before you can add new CloudFront resources.
+
+  Una vez habilitada la cuenta:
+
+    aws cloudformation deploy --template-file frontend-cloudfront.yaml \
+      --stack-name aprobaciones-frontend-cdn --parameter-overrides Etapa=dev
+
+  Después hay que recompilar el frontend con la URL de la distribución en
+  URL_MF_SOLICITANTE / URL_MF_APROBADOR y actualizar UrlBaseFrontend del stack
+  de la API, para que los enlaces del correo y CORS apunten al nuevo dominio.
+
+Parameters:
+  Etapa:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, qa, prod]
+
+Resources:
+  # Bucket privado: solo CloudFront lo lee, mediante Origin Access Control.
+  BucketFrontend:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub aprobaciones-frontend-cdn-${Etapa}-${AWS::AccountId}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  ControlAccesoOrigen:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub aprobaciones-oac-${Etapa}
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  PoliticaBucket:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref BucketFrontend
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub '${BucketFrontend.Arn}/*'
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribucion}
+
+  Distribucion:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub Microfrontends de aprobaciones (${Etapa})
+        DefaultRootObject: index.html
+        PriceClass: PriceClass_100
+        HttpVersion: http2
+        Origins:
+          - Id: origenS3
+            DomainName: !GetAtt BucketFrontend.RegionalDomainName
+            OriginAccessControlId: !GetAtt ControlAccesoOrigen.Id
+            S3OriginConfig: {}
+        DefaultCacheBehavior:
+          TargetOriginId: origenS3
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS]
+          Compress: true
+          # CachingOptimized, política administrada por AWS.
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+        CustomErrorResponses:
+          # El host es una SPA: /approve y /solicitudes/:id no son objetos del
+          # bucket, así que S3 responde 403/404 y hay que servir el index para
+          # que el enrutador de React resuelva la ruta. A diferencia del sitio
+          # web estático, aquí sí se devuelve un 200.
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 10
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 10
+
+Outputs:
+  UrlFrontend:
+    Description: URL pública de la aplicación (HTTPS).
+    Value: !Sub https://${Distribucion.DomainName}
+  NombreBucketFrontend:
+    Value: !Ref BucketFrontend
+  IdDistribucion:
+    Value: !Ref Distribucion

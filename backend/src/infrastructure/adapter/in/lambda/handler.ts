@@ -30,7 +30,7 @@ export const handler = async (
   const { enrutador, configuracion } = obtenerAplicacion();
 
   const metodo = (evento.requestContext?.http?.method ?? 'GET').toUpperCase() as MetodoHttp;
-  const ruta = evento.rawPath ?? '/';
+  const ruta = rutaSinEtapa(evento.rawPath ?? '/', evento.requestContext?.stage);
   const cors = cabecerasCors(
     evento.headers?.origin ?? evento.headers?.Origin,
     configuracion.origenesPermitidos,
@@ -65,6 +65,21 @@ export const handler = async (
     body: respuesta.cuerpo === undefined ? '' : JSON.stringify(respuesta.cuerpo),
   };
 };
+
+/**
+ * Quita el prefijo del stage de la ruta.
+ *
+ * Con un stage con nombre (`dev`, `prod`), API Gateway entrega `rawPath` con el
+ * stage delante: `/dev/api/salud`. Con el stage `$default` no lo hace. El
+ * enrutador solo conoce rutas de la API, así que el prefijo se retira aquí, que
+ * es el único lugar que sabe de API Gateway.
+ */
+export function rutaSinEtapa(rutaCruda: string, etapa: string | undefined): string {
+  if (!etapa || etapa === '$default') return rutaCruda;
+  const prefijo = `/${etapa}`;
+  if (rutaCruda === prefijo) return '/';
+  return rutaCruda.startsWith(`${prefijo}/`) ? rutaCruda.slice(prefijo.length) : rutaCruda;
+}
 
 /** Cuerpo JSON; si no es JSON válido se entrega crudo y el controlador valida. */
 function interpretarCuerpo(evento: APIGatewayProxyEventV2): unknown {

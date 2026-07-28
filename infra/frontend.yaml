@@ -1,0 +1,56 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Hospedaje estático de los microfrontends en S3 (website hosting).
+
+  Nota: lo correcto en producción es CloudFront con Origin Access Control sobre
+  un bucket privado —da HTTPS, CDN y no expone el origen—. No se usa aquí porque
+  la cuenta con la que se desplegó es nueva y AWS exige verificarla con soporte
+  antes de permitir distribuciones de CloudFront. La versión con CloudFront está
+  en el historial de git (infra/frontend.yaml, primer commit del despliegue) y
+  puede aplicarse en cuanto la cuenta quede habilitada.
+
+Parameters:
+  Etapa:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, qa, prod]
+
+Resources:
+  BucketFrontend:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub aprobaciones-frontend-${Etapa}-${AWS::AccountId}
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        # El host es una SPA: /approve y /solicitudes/:id no son objetos del
+        # bucket. Servir el index ante un 404 deja que el enrutador de React
+        # resuelva la ruta, que es el equivalente de historyApiFallback.
+        ErrorDocument: index.html
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: false
+        RestrictPublicBuckets: false
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+
+  # Solo lectura de objetos, y solo del contenido estático que ya es público por
+  # naturaleza: el bundle del frontend. No hay datos ni credenciales aquí.
+  PoliticaLecturaPublica:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref BucketFrontend
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action: s3:GetObject
+            Resource: !Sub '${BucketFrontend.Arn}/*'
+
+Outputs:
+  UrlFrontend:
+    Description: URL pública de la aplicación (endpoint de sitio web de S3).
+    Value: !GetAtt BucketFrontend.WebsiteURL
+  NombreBucketFrontend:
+    Value: !Ref BucketFrontend
