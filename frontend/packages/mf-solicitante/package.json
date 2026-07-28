@@ -1,0 +1,13 @@
+{
+  "name": "@aprobaciones/mf-solicitante",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Microfrontend del rol Solicitante: crear solicitudes y seguir su estado",
+  "scripts": {
+    "dev": "webpack serve --mode development",
+    "build": "webpack --mode production"
+  },
+  "dependencies": {
+    "@aprobaciones/shared": "1.0.0"
+  }
+}

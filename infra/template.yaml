@@ -1,0 +1,177 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Flujo de aprobaciones con firma digital concatenada.
+  API Gateway (HTTP API) + Lambda + DynamoDB + S3.
+
+Parameters:
+  Etapa:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, qa, prod]
+    Description: Sufijo de los recursos y nombre del stage de API Gateway.
+  UrlBaseFrontend:
+    Type: String
+    Default: http://localhost:3000
+    Description: >
+      Origen del frontend. Se usa para construir el enlace de aprobación que
+      viaja en el correo y como origen permitido de CORS.
+  ExponerOtp:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+    Description: >
+      Devuelve el OTP en la respuesta de /api/aprobaciones/otp. Útil para
+      revisar el flujo en la demo; debe ser 'false' en un entorno real.
+
+Globals:
+  Function:
+    Runtime: nodejs22.x
+    Timeout: 25
+    MemorySize: 512
+    Architectures: [arm64]
+    Tracing: Active
+    Environment:
+      Variables:
+        NODE_OPTIONS: --enable-source-maps
+
+Resources:
+  # ---------------------------------------------------------------------------
+  # Persistencia: tabla única. El diseño de claves está documentado en
+  # backend/src/infrastructure/adapter/out/persistencia/dynamo/esquema.ts
+  # ---------------------------------------------------------------------------
+  TablaAprobaciones:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub aprobaciones-${Etapa}
+      # Bajo demanda: el tráfico de una prueba es esporádico y no justifica
+      # capacidad aprovisionada.
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: PK, AttributeType: S }
+        - { AttributeName: SK, AttributeType: S }
+        - { AttributeName: GSI1PK, AttributeType: S }
+        - { AttributeName: GSI1SK, AttributeType: S }
+        - { AttributeName: GSI2PK, AttributeType: S }
+        - { AttributeName: GSI2SK, AttributeType: S }
+      KeySchema:
+        - { AttributeName: PK, KeyType: HASH }
+        - { AttributeName: SK, KeyType: RANGE }
+      GlobalSecondaryIndexes:
+        # Listado del panel filtrado por solicitante.
+        - IndexName: gsi1-solicitante
+          KeySchema:
+            - { AttributeName: GSI1PK, KeyType: HASH }
+            - { AttributeName: GSI1SK, KeyType: RANGE }
+          Projection: { ProjectionType: ALL }
+        # Listado completo y buzón simulado, sin recurrir a Scan.
+        - IndexName: gsi2-tipo
+          KeySchema:
+            - { AttributeName: GSI2PK, KeyType: HASH }
+            - { AttributeName: GSI2SK, KeyType: RANGE }
+          Projection: { ProjectionType: ALL }
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+
+  # ---------------------------------------------------------------------------
+  # Evidencias en PDF. Bucket privado: se sirven por la API, nunca directo.
+  # ---------------------------------------------------------------------------
+  BucketEvidencias:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub aprobaciones-evidencias-${Etapa}-${AWS::AccountId}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+
+  # ---------------------------------------------------------------------------
+  # API HTTP. Una sola función proxy: el enrutamiento vive en el código
+  # (adapter/in/http/rutas.ts), que es el mismo que usa el servidor local.
+  # ---------------------------------------------------------------------------
+  ApiAprobaciones:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: !Ref Etapa
+      CorsConfiguration:
+        AllowOrigins: [!Ref UrlBaseFrontend]
+        AllowHeaders: [Content-Type, Authorization]
+        AllowMethods: [GET, POST, OPTIONS]
+        MaxAge: 600
+      AccessLogSettings:
+        DestinationArn: !GetAtt RegistroApi.Arn
+        Format: '{"solicitud":"$context.requestId","ruta":"$context.routeKey","estado":"$context.status","latenciaMs":"$context.responseLatency"}'
+
+  RegistroApi:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/apigateway/aprobaciones-${Etapa}
+      RetentionInDays: 14
+
+  FuncionApi:
+    Type: AWS::Serverless::Function
+    Metadata:
+      # El build lo define infra/Makefile: compila TypeScript e instala solo
+      # las dependencias de producción.
+      BuildMethod: makefile
+    Properties:
+      FunctionName: !Sub aprobaciones-api-${Etapa}
+      CodeUri: ../backend
+      Handler: infrastructure/adapter/in/lambda/handler.handler
+      Description: API REST del flujo de aprobaciones con firma concatenada
+      Environment:
+        Variables:
+          PERSISTENCIA: dynamo
+          ALMACEN: s3
+          TABLA_DYNAMO: !Ref TablaAprobaciones
+          BUCKET_EVIDENCIAS: !Ref BucketEvidencias
+          URL_BASE_FRONTEND: !Ref UrlBaseFrontend
+          ORIGENES_PERMITIDOS: !Ref UrlBaseFrontend
+          EXPONER_OTP: !Ref ExponerOtp
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TablaAprobaciones
+        - S3CrudPolicy:
+            BucketName: !Sub aprobaciones-evidencias-${Etapa}-${AWS::AccountId}
+      Events:
+        Raiz:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ApiAprobaciones
+            Path: /
+            Method: ANY
+        Todo:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ApiAprobaciones
+            Path: /{proxy+}
+            Method: ANY
+
+  RegistroFuncion:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/aprobaciones-api-${Etapa}
+      RetentionInDays: 14
+
+Outputs:
+  UrlApi:
+    Description: URL base de la API. Es el valor de API_URL para el frontend.
+    Value: !Sub https://${ApiAprobaciones}.execute-api.${AWS::Region}.amazonaws.com/${Etapa}
+  NombreTabla:
+    Value: !Ref TablaAprobaciones
+  NombreBucket:
+    Value: !Ref BucketEvidencias

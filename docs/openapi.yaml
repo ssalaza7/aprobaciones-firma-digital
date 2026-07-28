@@ -1,0 +1,530 @@
+openapi: 3.0.3
+
+info:
+  title: API de aprobaciones con firma digital concatenada
+  version: 1.0.0
+  description: |
+    API REST del flujo de aprobación de solicitudes de compra.
+
+    **Flujo completo, en orden:**
+
+    1. `POST /api/solicitudes` — el solicitante crea la solicitud con tres
+       aprobadores de roles distintos. La respuesta incluye los enlaces únicos
+       (también se "envían" al buzón simulado).
+    2. `POST /api/aprobaciones/otp` — el aprobador abre su enlace y el sistema
+       le emite un código de un solo uso, válido **3 minutos**.
+    3. `POST /api/aprobaciones/otp/validar` — con el código correcto se devuelve
+       el detalle de la compra y un `tokenSesion` de 15 minutos.
+    4. `POST /api/aprobaciones/decision` — el aprobador firma o rechaza usando
+       el `tokenSesion` (nunca el OTP).
+    5. Con las tres firmas el backend genera el PDF y la solicitud pasa a
+       `COMPLETADA`; se descarga en `GET /api/solicitudes/{id}/evidencia.pdf`.
+
+    **Sin autenticación.** El ejercicio no incluye gestión de usuarios: la
+    autorización del aprobador es la posesión del token del enlace más el OTP.
+    Ver la sección "Supuestos" del README.
+
+  contact:
+    name: Prueba técnica
+
+servers:
+  - url: http://localhost:4000
+    description: Ejecución local
+  - url: https://{idApi}.execute-api.{region}.amazonaws.com/{etapa}
+    description: Despliegue en AWS (API Gateway HTTP API)
+    variables:
+      idApi: { default: xxxxxxxxxx }
+      region: { default: us-east-1 }
+      etapa: { default: dev }
+
+tags:
+  - name: Solicitudes
+    description: Alta y consulta de solicitudes (rol Solicitante)
+  - name: Aprobaciones
+    description: OTP y decisión (rol Aprobador)
+  - name: Evidencia
+    description: PDF con las firmas
+  - name: Utilidades
+    description: Catálogos, salud y buzón de correo simulado
+
+paths:
+  /api/salud:
+    get:
+      tags: [Utilidades]
+      summary: Comprobación de vida del servicio
+      responses:
+        '200':
+          description: El servicio responde
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  estado: { type: string, example: OK }
+
+  /api/roles:
+    get:
+      tags: [Utilidades]
+      summary: Catálogo de roles que pueden aprobar
+      description: Alimenta los selectores del formulario de creación.
+      responses:
+        '200':
+          description: Roles disponibles
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    rol: { type: string, example: JEFE_AREA }
+                    etiqueta: { type: string, example: Jefe de Área }
+
+  /api/solicitudes:
+    post:
+      tags: [Solicitudes]
+      summary: Crear una solicitud de compra
+      description: |
+        Valida las reglas del dominio (monto positivo, tres aprobadores con
+        roles y correos distintos), genera un token único por aprobador y
+        dispara el correo simulado con el enlace de aprobación.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NuevaSolicitud'
+            examples:
+              compraTipica:
+                summary: Compra de equipos con tres roles distintos
+                value:
+                  titulo: Compra de 15 portátiles para operaciones
+                  descripcion: Renovación del parque de equipos del área de operaciones
+                  monto: 45000000
+                  moneda: COP
+                  solicitante:
+                    nombre: Ana Restrepo
+                    correo: ana.restrepo@empresa.com
+                  aprobadores:
+                    - { nombre: Carlos Pérez, correo: carlos.perez@empresa.com, rol: JEFE_AREA }
+                    - { nombre: Diana Gómez, correo: diana.gomez@empresa.com, rol: FINANZAS }
+                    - { nombre: Esteban Ruiz, correo: esteban.ruiz@empresa.com, rol: GERENCIA }
+      responses:
+        '201':
+          description: Solicitud creada en estado PENDIENTE
+          headers:
+            Location:
+              schema: { type: string }
+              description: Ruta del detalle de la solicitud creada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  solicitud: { $ref: '#/components/schemas/Solicitud' }
+                  enlacesAprobacion:
+                    type: array
+                    description: |
+                      Enlaces generados por aprobador. Se devuelven para poder
+                      recorrer el flujo sin abrir el buzón; en producción solo
+                      viajarían por correo.
+                    items:
+                      type: object
+                      properties:
+                        rol: { type: string }
+                        correo: { type: string }
+                        enlace:
+                          type: string
+                          example: http://localhost:3000/approve?solicitud_id=1234&approver_token=ABCDEF
+        '400':
+          $ref: '#/components/responses/ErrorValidacion'
+
+    get:
+      tags: [Solicitudes]
+      summary: Listar solicitudes
+      parameters:
+        - name: solicitante
+          in: query
+          required: false
+          schema: { type: string, format: email }
+          description: Filtra por el correo del solicitante.
+      responses:
+        '200':
+          description: Listado, de la más reciente a la más antigua
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer, example: 2 }
+                  solicitudes:
+                    type: array
+                    items: { $ref: '#/components/schemas/Solicitud' }
+
+  /api/solicitudes/{id}:
+    get:
+      tags: [Solicitudes]
+      summary: Detalle de una solicitud
+      parameters:
+        - $ref: '#/components/parameters/IdSolicitud'
+      responses:
+        '200':
+          description: Solicitud encontrada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Solicitud' }
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+
+  /api/solicitudes/{id}/evidencia.pdf:
+    get:
+      tags: [Evidencia]
+      summary: Descargar el PDF de evidencia
+      description: |
+        Disponible cuando los tres aprobadores han firmado. El PDF incluye los
+        datos de la solicitud, la tabla de aprobadores con nombre, fecha y firma
+        simulada, y la cadena de hashes SHA-256 con su verificación.
+      parameters:
+        - $ref: '#/components/parameters/IdSolicitud'
+      responses:
+        '200':
+          description: Documento PDF
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '409':
+          description: Aún no están las tres firmas, o la solicitud fue rechazada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/aprobaciones/otp:
+    post:
+      tags: [Aprobaciones]
+      summary: Solicitar el código de un solo uso
+      description: |
+        Emite un OTP de 6 dígitos con vigencia de 3 minutos y lo envía al correo
+        del aprobador (simulado). Llamarlo de nuevo reemplaza el código anterior
+        y reinicia el contador de intentos.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [solicitud_id, approver_token]
+              properties:
+                solicitud_id: { type: string }
+                approver_token: { type: string }
+      responses:
+        '200':
+          description: Código emitido
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  solicitudId: { type: string }
+                  tituloSolicitud: { type: string }
+                  aprobador:
+                    type: object
+                    properties:
+                      nombre: { type: string }
+                      correo: { type: string, description: Enmascarado }
+                      rol: { type: string }
+                      etiquetaRol: { type: string }
+                  enviadoA: { type: string, example: c*****@empresa.com }
+                  expiraEn: { type: string, format: date-time }
+                  segundosVigencia: { type: integer, example: 180 }
+                  otpDemo:
+                    type: string
+                    nullable: true
+                    description: Solo si EXPONER_OTP=true. En producción es null.
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '409':
+          description: El flujo ya está cerrado o el aprobador ya decidió
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/aprobaciones/otp/validar:
+    post:
+      tags: [Aprobaciones]
+      summary: Validar el OTP y abrir la sesión de firma
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [solicitud_id, approver_token, otp]
+              properties:
+                solicitud_id: { type: string }
+                approver_token: { type: string }
+                otp: { type: string, example: '123456' }
+      responses:
+        '200':
+          description: Código correcto; se devuelve el detalle de la compra
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  solicitud: { $ref: '#/components/schemas/Solicitud' }
+                  aprobador: { $ref: '#/components/schemas/Aprobador' }
+                  tokenSesion:
+                    type: string
+                    description: Requerido para registrar la decisión. Vigencia 15 minutos.
+                  sesionExpiraEn: { type: string, format: date-time }
+        '401':
+          description: |
+            Código incorrecto, expirado o bloqueado. El campo `motivo` distingue
+            el caso: `INCORRECTO`, `EXPIRADO`, `BLOQUEADO`, `NO_SOLICITADO`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                expirado:
+                  value:
+                    codigo: OTP_INVALIDO
+                    mensaje: El código expiró. Solicite uno nuevo.
+                    motivo: EXPIRADO
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+
+  /api/aprobaciones/decision:
+    post:
+      tags: [Aprobaciones]
+      summary: Aprobar (firmar) o rechazar
+      description: |
+        Al aprobar se registra la firma —nombre, fecha y trazo simulado— como
+        nuevo eslabón de la cadena de hashes. Al rechazar, la solicitud pasa a
+        `RECHAZADA` y ningún otro aprobador puede continuar.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [solicitud_id, approver_token, session_token, decision]
+              properties:
+                solicitud_id: { type: string }
+                approver_token: { type: string }
+                session_token: { type: string }
+                decision: { type: string, enum: [APROBAR, RECHAZAR] }
+                motivo:
+                  type: string
+                  maxLength: 500
+                  description: Opcional, solo para RECHAZAR.
+      responses:
+        '200':
+          description: Decisión registrada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  solicitud: { $ref: '#/components/schemas/Solicitud' }
+                  mensaje: { type: string }
+        '401':
+          description: Sesión inválida o expirada; hay que validar el OTP de nuevo
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: El aprobador ya decidió, o la solicitud ya está cerrada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/mock-mail:
+    get:
+      tags: [Utilidades]
+      summary: Buzón de correo simulado
+      description: |
+        El envío de correo está simulado (lo permite el enunciado). Cada mensaje
+        se registra en el log y queda disponible aquí con su enlace o su código.
+      parameters:
+        - name: solicitud_id
+          in: query
+          schema: { type: string }
+        - name: para
+          in: query
+          schema: { type: string, format: email }
+      responses:
+        '200':
+          description: Correos, del más reciente al más antiguo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  correos:
+                    type: array
+                    items: { $ref: '#/components/schemas/CorreoSimulado' }
+
+components:
+  parameters:
+    IdSolicitud:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+
+  responses:
+    ErrorValidacion:
+      description: Los datos violan una regla del dominio
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          examples:
+            rolesRepetidos:
+              value:
+                codigo: VALIDACION
+                mensaje: Los tres aprobadores deben tener roles distintos
+    NoEncontrado:
+      description: El recurso o el enlace no existe
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    Error:
+      type: object
+      description: Cuerpo uniforme de todos los errores 4xx y 5xx.
+      properties:
+        codigo:
+          type: string
+          enum:
+            - VALIDACION
+            - OTP_INVALIDO
+            - SESION_INVALIDA
+            - NO_ENCONTRADO
+            - TRANSICION_INVALIDA
+            - CONFLICTO_CONCURRENCIA
+            - METODO_NO_PERMITIDO
+            - ERROR_INTERNO
+        mensaje: { type: string }
+        motivo:
+          type: string
+          description: Detalle adicional; hoy solo lo usa OTP_INVALIDO.
+
+    NuevaSolicitud:
+      type: object
+      required: [titulo, descripcion, monto, solicitante, aprobadores]
+      properties:
+        titulo: { type: string, minLength: 5, maxLength: 140 }
+        descripcion: { type: string, minLength: 10, maxLength: 2000 }
+        monto:
+          type: number
+          exclusiveMinimum: true
+          minimum: 0
+          description: Máximo dos decimales.
+        moneda: { type: string, default: COP, pattern: '^[A-Z]{3}$' }
+        solicitante:
+          type: object
+          required: [nombre, correo]
+          properties:
+            nombre: { type: string, minLength: 3 }
+            correo: { type: string, format: email }
+        aprobadores:
+          type: array
+          minItems: 3
+          maxItems: 3
+          description: Exactamente tres, con roles y correos distintos entre sí.
+          items:
+            type: object
+            required: [nombre, correo, rol]
+            properties:
+              nombre: { type: string, minLength: 3, maxLength: 120 }
+              correo: { type: string, format: email }
+              rol: { $ref: '#/components/schemas/Rol' }
+
+    Rol:
+      type: string
+      enum: [JEFE_AREA, FINANZAS, COMPRAS, LEGAL, GERENCIA]
+
+    Aprobador:
+      type: object
+      properties:
+        id: { type: string }
+        nombre: { type: string }
+        correo: { type: string, format: email }
+        rol: { $ref: '#/components/schemas/Rol' }
+        etiquetaRol: { type: string, example: Jefe de Área }
+        estado: { type: string, enum: [PENDIENTE, FIRMADO, RECHAZADO] }
+        firmadoEn: { type: string, format: date-time, nullable: true }
+        trazoFirma:
+          type: string
+          nullable: true
+          example: Carlos P.
+          description: Imagen de firma simulada; el PDF la dibuja en cursiva.
+        rechazadoEn: { type: string, format: date-time, nullable: true }
+        motivoRechazo: { type: string, nullable: true }
+        secuenciaFirma:
+          type: integer
+          nullable: true
+          description: Posición de la firma en la cadena (1 a 3).
+        hashFirma:
+          type: string
+          nullable: true
+          description: SHA-256 del eslabón, que incluye el hash de la firma anterior.
+
+    Solicitud:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        titulo: { type: string }
+        descripcion: { type: string }
+        monto:
+          type: object
+          properties:
+            valor: { type: number, example: 45000000 }
+            moneda: { type: string, example: COP }
+            formateado: { type: string, example: '$ 45.000.000,00 COP' }
+        solicitante:
+          type: object
+          properties:
+            nombre: { type: string }
+            correo: { type: string, format: email }
+        estado:
+          type: string
+          enum: [PENDIENTE, COMPLETADA, RECHAZADA]
+          description: |
+            `PENDIENTE` mientras el flujo sigue abierto, `COMPLETADA` con las
+            tres firmas y el PDF generado, `RECHAZADA` si alguien rechazó. El
+            estado por aprobador va en `aprobadores[].estado`.
+        creadaEn: { type: string, format: date-time }
+        actualizadaEn: { type: string, format: date-time }
+        aprobadores:
+          type: array
+          items: { $ref: '#/components/schemas/Aprobador' }
+        firmasRegistradas: { type: integer, example: 2 }
+        aprobadoresRequeridos: { type: integer, example: 3 }
+        evidenciaDisponible: { type: boolean }
+        urlEvidencia:
+          type: string
+          nullable: true
+          example: /api/solicitudes/1234/evidencia.pdf
+
+    CorreoSimulado:
+      type: object
+      properties:
+        id: { type: string }
+        para: { type: string, format: email }
+        asunto: { type: string }
+        cuerpo: { type: string }
+        enviadoEn: { type: string, format: date-time }
+        contexto:
+          type: object
+          properties:
+            solicitudId: { type: string }
+            tipo:
+              type: string
+              enum: [INVITACION_APROBACION, CODIGO_OTP, RESULTADO_SOLICITUD]
+            enlace: { type: string, nullable: true }
+            otp: { type: string, nullable: true }

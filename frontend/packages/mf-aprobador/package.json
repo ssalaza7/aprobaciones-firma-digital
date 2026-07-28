@@ -1,0 +1,13 @@
+{
+  "name": "@aprobaciones/mf-aprobador",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Microfrontend del rol Aprobador: validación por OTP, detalle de la compra y firma",
+  "scripts": {
+    "dev": "webpack serve --mode development",
+    "build": "webpack --mode production"
+  },
+  "dependencies": {
+    "@aprobaciones/shared": "1.0.0"
+  }
+}

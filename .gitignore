@@ -1,0 +1,29 @@
+# dependencias
+node_modules/
+
+# artefactos de compilación
+dist/
+.aws-sam/
+*.tsbuildinfo
+
+# cobertura y reportes de pruebas
+coverage/
+
+# datos locales (evidencias en PDF generadas al ejecutar sin AWS)
+.datos/
+
+# entorno
+.env
+.env.*
+!.env.example
+
+# sistema operativo / editores
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# logs
+*.log
+npm-debug.log*

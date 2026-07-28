@@ -1,0 +1,475 @@
+/* Hoja de estilos común a los microfrontends. Sin framework de UI: el
+   enunciado evalúa arquitectura y flujo, no la librería de componentes. */
+
+:root {
+  --tinta: #12203a;
+  --tinta-suave: #5b6472;
+  --borde: #dde3ec;
+  --fondo: #f5f7fb;
+  --superficie: #ffffff;
+  --acento: #1d4ed8;
+  --acento-suave: #eaf0ff;
+  --exito: #116b3a;
+  --exito-suave: #e6f5ec;
+  --alerta: #8a6d1f;
+  --alerta-suave: #fdf5e0;
+  --error: #a3221f;
+  --error-suave: #fdecec;
+  --radio: 10px;
+  --sombra: 0 1px 2px rgba(18, 32, 58, 0.06), 0 8px 24px rgba(18, 32, 58, 0.06);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  background: var(--fondo);
+  color: var(--tinta);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+a {
+  color: var(--acento);
+}
+
+/* ---------- Estructura ---------- */
+
+.cabecera {
+  background: var(--tinta);
+  color: #fff;
+  padding: 0 24px;
+}
+
+.cabecera__contenido {
+  max-width: 1040px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  height: 60px;
+}
+
+.cabecera__marca {
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.cabecera__marca span {
+  display: block;
+  font-size: 11px;
+  font-weight: 400;
+  color: #b9c5d8;
+  letter-spacing: 0.02em;
+}
+
+.cabecera nav {
+  display: flex;
+  gap: 18px;
+  margin-left: auto;
+}
+
+.cabecera nav a {
+  color: #c3cede;
+  text-decoration: none;
+  font-size: 14px;
+  padding: 6px 0;
+  border-bottom: 2px solid transparent;
+}
+
+.cabecera nav a:hover {
+  color: #fff;
+}
+
+.cabecera nav a.activo {
+  color: #fff;
+  border-bottom-color: #6b93ff;
+}
+
+.contenido {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 28px 24px 64px;
+}
+
+.contenido--estrecho {
+  max-width: 640px;
+}
+
+.encabezado-pagina {
+  margin-bottom: 22px;
+}
+
+.encabezado-pagina h1 {
+  font-size: 22px;
+  margin: 0 0 4px;
+  letter-spacing: -0.01em;
+}
+
+.encabezado-pagina p {
+  margin: 0;
+  color: var(--tinta-suave);
+  font-size: 14px;
+}
+
+.tarjeta {
+  background: var(--superficie);
+  border: 1px solid var(--borde);
+  border-radius: var(--radio);
+  box-shadow: var(--sombra);
+  padding: 20px;
+  margin-bottom: 16px;
+}
+
+.tarjeta h2 {
+  font-size: 15px;
+  margin: 0 0 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--tinta-suave);
+}
+
+/* ---------- Formularios ---------- */
+
+.campo {
+  display: block;
+  margin-bottom: 16px;
+}
+
+.campo__etiqueta {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.campo input,
+.campo select,
+.campo textarea {
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid var(--borde);
+  border-radius: 8px;
+  font: inherit;
+  background: #fff;
+  color: inherit;
+}
+
+.campo input:focus,
+.campo select:focus,
+.campo textarea:focus {
+  outline: 2px solid var(--acento);
+  outline-offset: -1px;
+  border-color: var(--acento);
+}
+
+.campo textarea {
+  min-height: 90px;
+  resize: vertical;
+}
+
+.campo--error input,
+.campo--error select,
+.campo--error textarea {
+  border-color: var(--error);
+}
+
+.campo__error {
+  display: block;
+  color: var(--error);
+  font-size: 12.5px;
+  margin-top: 5px;
+}
+
+.campo__ayuda {
+  display: block;
+  color: var(--tinta-suave);
+  font-size: 12.5px;
+  margin-top: 5px;
+}
+
+.rejilla {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 0 16px;
+}
+
+.boton {
+  border: 1px solid transparent;
+  background: var(--acento);
+  color: #fff;
+  padding: 9px 16px;
+  border-radius: 8px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.boton:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.boton:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.boton--secundario {
+  background: #fff;
+  color: var(--tinta);
+  border-color: var(--borde);
+}
+
+.boton--peligro {
+  background: var(--error);
+}
+
+.boton--texto {
+  background: none;
+  color: var(--acento);
+  padding: 0 4px;
+  border: 0;
+  text-decoration: underline;
+}
+
+.acciones {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 8px;
+}
+
+/* ---------- Estados y avisos ---------- */
+
+.estado {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.estado--pendiente {
+  background: var(--alerta-suave);
+  color: var(--alerta);
+}
+
+.estado--firmado,
+.estado--completada {
+  background: var(--exito-suave);
+  color: var(--exito);
+}
+
+.estado--rechazado,
+.estado--rechazada {
+  background: var(--error-suave);
+  color: var(--error);
+}
+
+.alerta {
+  padding: 11px 14px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  font-size: 14px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.alerta--error {
+  background: var(--error-suave);
+  color: var(--error);
+}
+
+.alerta--exito {
+  background: var(--exito-suave);
+  color: var(--exito);
+}
+
+.alerta--info {
+  background: var(--acento-suave);
+  color: var(--acento);
+}
+
+.cargando {
+  color: var(--tinta-suave);
+  padding: 20px 0;
+}
+
+.vacio {
+  text-align: center;
+  color: var(--tinta-suave);
+  padding: 40px 20px;
+}
+
+/* ---------- Tablas y listas ---------- */
+
+.tabla {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.tabla th {
+  text-align: left;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--tinta-suave);
+  padding: 0 10px 8px;
+  border-bottom: 1px solid var(--borde);
+}
+
+.tabla td {
+  padding: 12px 10px;
+  border-bottom: 1px solid var(--borde);
+  vertical-align: top;
+}
+
+.tabla tr:last-child td {
+  border-bottom: 0;
+}
+
+.lista-solicitudes {
+  display: grid;
+  gap: 12px;
+}
+
+.item-solicitud {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+  background: var(--superficie);
+  border: 1px solid var(--borde);
+  border-radius: var(--radio);
+  padding: 16px 18px;
+  box-shadow: var(--sombra);
+}
+
+.item-solicitud:hover {
+  border-color: var(--acento);
+}
+
+.item-solicitud__fila {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.item-solicitud h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.item-solicitud__meta {
+  color: var(--tinta-suave);
+  font-size: 13px;
+  margin: 4px 0 10px;
+}
+
+.datos {
+  display: grid;
+  grid-template-columns: 150px 1fr;
+  gap: 10px 16px;
+  font-size: 14px;
+}
+
+.datos dt {
+  color: var(--tinta-suave);
+  font-weight: 600;
+}
+
+.datos dd {
+  margin: 0;
+}
+
+.firma {
+  font-style: italic;
+  font-weight: 700;
+  color: var(--acento);
+  font-size: 16px;
+  border-bottom: 1px solid var(--borde);
+  padding-bottom: 2px;
+  display: inline-block;
+}
+
+.hash {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: var(--tinta-suave);
+  word-break: break-all;
+}
+
+.progreso {
+  position: relative;
+  background: var(--borde);
+  border-radius: 999px;
+  height: 22px;
+  overflow: hidden;
+  min-width: 160px;
+}
+
+.progreso__barra {
+  background: var(--acento);
+  height: 100%;
+  transition: width 0.3s ease;
+}
+
+.progreso__texto {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--tinta);
+}
+
+/* ---------- OTP ---------- */
+
+.otp {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.otp input {
+  font-size: 26px;
+  letter-spacing: 0.5em;
+  text-align: center;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  max-width: 220px;
+}
+
+.cuenta-regresiva {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: 700;
+}
+
+.cuenta-regresiva--urgente {
+  color: var(--error);
+}
+
+.pista-demo {
+  background: var(--acento-suave);
+  border: 1px dashed var(--acento);
+  color: var(--acento);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+
+.pista-demo code {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}

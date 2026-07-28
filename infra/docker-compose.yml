@@ -1,0 +1,25 @@
+# Infraestructura local opcional.
+#
+# Permite ejercitar el adaptador real de DynamoDB sin una cuenta de AWS. Sin
+# esto el backend corre igual, con el adaptador en memoria (PERSISTENCIA=memoria).
+services:
+  dynamodb:
+    image: amazon/dynamodb-local:2.5.2
+    container_name: aprobaciones-dynamodb
+    command: -jar DynamoDBLocal.jar -sharedDb -inMemory
+    ports:
+      - '8000:8000'
+
+  # Consola web para inspeccionar la tabla: http://localhost:8001
+  admin-dynamodb:
+    image: aaronshaf/dynamodb-admin:latest
+    container_name: aprobaciones-dynamodb-admin
+    environment:
+      DYNAMO_ENDPOINT: http://dynamodb:8000
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: local
+      AWS_SECRET_ACCESS_KEY: local
+    ports:
+      - '8001:8001'
+    depends_on:
+      - dynamodb

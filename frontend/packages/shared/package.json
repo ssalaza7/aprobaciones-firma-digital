@@ -1,0 +1,8 @@
+{
+  "name": "@aprobaciones/shared",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Contratos, cliente HTTP y componentes comunes a los microfrontends",
+  "main": "src/index.ts",
+  "types": "src/index.ts"
+}
