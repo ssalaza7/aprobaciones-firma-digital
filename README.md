@@ -21,8 +21,7 @@ webpack 5.
 | | |
 |---|---|
 | **Aplicación** | http://aprobaciones-frontend-dev-779715474515.s3-website-us-east-1.amazonaws.com |
-| **API** | https://gt8jx5d8dk.execute-api.us-east-1.amazonaws.com/dev |
-| Región | `us-east-1` · cuenta `779715474515` |
+| Región | `us-east-1` |
 
 Para recorrer el flujo: cree una solicitud, abra *Ver correos simulados* en el
 detalle y copie el enlace de un aprobador. El OTP aparece en pantalla porque el
@@ -353,15 +352,18 @@ certificaba el cierre).
 
 ## Despliegue en AWS
 
-Desplegado en la cuenta `779715474515`, región `us-east-1`:
+Desplegado en la región `us-east-1`:
 
 | Recurso | Valor |
 |---|---|
-| API (API Gateway + Lambda) | https://gt8jx5d8dk.execute-api.us-east-1.amazonaws.com/dev |
 | Frontend (S3 website) | http://aprobaciones-frontend-dev-779715474515.s3-website-us-east-1.amazonaws.com |
+| API | API Gateway (HTTP API) + Lambda `aprobaciones-api-dev` |
 | Tabla DynamoDB | `aprobaciones-dev` |
 | Bucket de evidencias | `aprobaciones-evidencias-dev-779715474515` |
 | Stacks | `aprobaciones-firma-digital`, `aprobaciones-frontend` |
+
+La URL de la API la imprime `sam deploy` como salida `UrlApi` del stack, y es la
+que consume el frontend; no hace falta usarla a mano para probar el flujo.
 
 Verificado en la nube de punta a punta: creación de la solicitud, los tres OTP,
 las tres firmas encadenadas, generación del PDF en S3 y descarga por la API.
