@@ -1,0 +1,31 @@
+# Configuración de despliegue para AWS SAM.
+#
+# Con este archivo el despliegue no necesita el modo interactivo:
+#
+#   sam build && sam deploy
+#
+# `resolve_s3` deja que SAM cree y administre el bucket donde sube el artefacto,
+# de modo que no hay que crearlo a mano antes del primer despliegue.
+
+version = 0.1
+
+[default.global.parameters]
+stack_name = "aprobaciones-firma-digital"
+
+[default.build.parameters]
+cached = true
+parallel = true
+
+[default.validate.parameters]
+lint = true
+
+[default.deploy.parameters]
+region = "us-east-1"
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = true
+resolve_s3 = true
+fail_on_empty_changeset = false
+parameter_overrides = "Etapa=\"dev\" UrlBaseFrontend=\"http://localhost:3000\" ExponerOtp=\"true\""
+
+[default.delete.parameters]
+no_prompts = true
