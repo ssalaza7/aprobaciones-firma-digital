@@ -25,7 +25,7 @@ capabilities = "CAPABILITY_IAM"
 confirm_changeset = true
 resolve_s3 = true
 fail_on_empty_changeset = false
-parameter_overrides = "Etapa=\"dev\" UrlBaseFrontend=\"http://localhost:3000\" ExponerOtp=\"true\""
+parameter_overrides = "Etapa=\"dev\" UrlBaseFrontend=\"http://aprobaciones-frontend-dev-779715474515.s3-website-us-east-1.amazonaws.com\" ExponerOtp=\"true\""
 
 [default.delete.parameters]
 no_prompts = true
