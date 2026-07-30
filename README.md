@@ -1,5 +1,8 @@
 # Flujo de aprobaciones con firma digital concatenada
 
+[![CI](https://github.com/ssalaza7/aprobaciones-firma-digital/actions/workflows/ci.yml/badge.svg)](https://github.com/ssalaza7/aprobaciones-firma-digital/actions/workflows/ci.yml)
+[![CD](https://github.com/ssalaza7/aprobaciones-firma-digital/actions/workflows/cd.yml/badge.svg)](https://github.com/ssalaza7/aprobaciones-firma-digital/actions/workflows/cd.yml)
+
 Aplicación web donde un **solicitante** crea una solicitud de compra y tres
 **aprobadores** de roles distintos la firman —cada uno validando su identidad con
 un OTP de 3 minutos— hasta producir un **PDF de evidencia** con las tres firmas
@@ -14,6 +17,7 @@ webpack 5.
 | Backend | TypeScript · Node 20+ · pdfkit · AWS SDK v3 · Jest |
 | Frontend | React 18 · React Router 6 · axios · webpack 5 (Module Federation) · Testing Library |
 | Infraestructura | AWS SAM: Lambda + API Gateway (HTTP API) + DynamoDB + S3 |
+| CI/CD | GitHub Actions · Gitflow · despliegue con OIDC, sin llaves guardadas |
 | Pruebas | **204 backend** (98 % líneas) · **66 frontend** (91 % líneas) — mínimo pedido: 60 % |
 
 ## Desplegado y funcionando
@@ -42,8 +46,9 @@ stack está desplegado con `ExponerOtp=true`.
 7. [API](#api)
 8. [Pruebas](#pruebas)
 9. [Despliegue en AWS](#despliegue-en-aws)
-10. [Supuestos y decisiones](#supuestos-y-decisiones)
-11. [Qué no está incluido](#qué-no-está-incluido)
+10. [Integración y despliegue continuos](#integración-y-despliegue-continuos)
+11. [Supuestos y decisiones](#supuestos-y-decisiones)
+12. [Qué no está incluido](#qué-no-está-incluido)
 
 ---
 
@@ -586,6 +591,34 @@ límite de Lambda son 250 MB descomprimidos.
 pasos que coordinar entre servicios. Cada acción del aprobador es una transacción
 corta y aislada sobre un agregado; introducir una máquina de estados añadiría
 latencia y una segunda fuente de verdad del estado, que ya vive en el agregado.
+
+---
+
+## Integración y despliegue continuos
+
+El repositorio sigue **Gitflow** —`main` es producción, `develop` integración, y
+las ramas `feature/`, `release/` y `hotfix/` son temporales— con dos flujos de
+GitHub Actions. El detalle del modelo de ramas y del ciclo completo está en
+[`CONTRIBUTING.md`](CONTRIBUTING.md).
+
+**CI** ([`ci.yml`](.github/workflows/ci.yml)) — en cada push a `main` o
+`develop` y en cada pull request hacia ellas:
+
+| Trabajo | Qué comprueba |
+|---|---|
+| Backend | Tipos, 204 pruebas y umbral de cobertura, con **DynamoDB Local** como servicio para que las pruebas del adaptador se ejecuten de verdad |
+| Frontend | Tipos, 66 pruebas, cobertura y que los **tres bundles** de Module Federation compilen |
+| Infraestructura | `sam validate --lint` sobre la plantilla |
+
+**CD** ([`cd.yml`](.github/workflows/cd.yml)) — al fusionar en `main`: repite el
+CI, despliega la API con SAM, compila los microfrontends contra la URL real que
+devuelve el stack, los publica en S3 y **verifica que lo desplegado responde**.
+Si `/api/salud` o el frontend no devuelven 200, el despliegue falla.
+
+No hay llaves de AWS en el repositorio: la autenticación es por **OIDC**, con un
+rol ([`infra/github-oidc.yaml`](infra/github-oidc.yaml)) que solo se puede
+asumir desde este repositorio y desde `main`, y con permisos acotados a los
+servicios del stack en lugar de `AdministratorAccess`.
 
 ---
 

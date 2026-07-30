@@ -1,0 +1,87 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Rol que GitHub Actions asume para desplegar, mediante OpenID Connect.
+
+  Evita guardar llaves de acceso permanentes en los secretos del repositorio:
+  GitHub presenta un token firmado de cada ejecución y AWS entrega credenciales
+  temporales solo si el token viene del repositorio y la rama esperados. No hay
+  nada que rotar ni que se pueda filtrar.
+
+Parameters:
+  Repositorio:
+    Type: String
+    Default: ssalaza7/aprobaciones-firma-digital
+    Description: Repositorio autorizado, en formato propietario/nombre.
+  Rama:
+    Type: String
+    Default: main
+    Description: Única rama desde la que se permite desplegar.
+
+Resources:
+  ProveedorGitHub:
+    Type: AWS::IAM::OIDCProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList: [sts.amazonaws.com]
+      # Huella del certificado de GitHub. AWS ya no la valida para este
+      # proveedor, pero el recurso sigue exigiendo el campo.
+      ThumbprintList: [6938fd4d98bab03faadb97b34396831e3780aea1]
+
+  RolDespliegue:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: github-actions-aprobaciones
+      Description: Despliegue del flujo de aprobaciones desde GitHub Actions
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Ref ProveedorGitHub
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              # La condición es lo que impide que otro repositorio -o incluso
+              # otra rama de este- obtenga credenciales.
+              StringLike:
+                token.actions.githubusercontent.com:sub: !Sub repo:${Repositorio}:ref:refs/heads/${Rama}
+      Policies:
+        - PolicyName: despliegue-serverless
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # Permisos acotados a los servicios que el stack realmente usa,
+              # en lugar de AdministratorAccess.
+              - Effect: Allow
+                Action:
+                  - cloudformation:*
+                  - lambda:*
+                  - apigateway:*
+                  - dynamodb:*
+                  - logs:*
+                  - xray:*
+                  - s3:*
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - iam:CreateRole
+                  - iam:DeleteRole
+                  - iam:GetRole
+                  - iam:PassRole
+                  - iam:TagRole
+                  - iam:AttachRolePolicy
+                  - iam:DetachRolePolicy
+                  - iam:PutRolePolicy
+                  - iam:DeleteRolePolicy
+                  - iam:GetRolePolicy
+                  - iam:ListRolePolicies
+                  - iam:ListAttachedRolePolicies
+                # Solo puede administrar los roles que crea el propio stack.
+                Resource: !Sub arn:aws:iam::${AWS::AccountId}:role/aprobaciones-*
+
+Outputs:
+  ArnRol:
+    Description: Valor de la variable AWS_ROLE_ARN del repositorio.
+    Value: !GetAtt RolDespliegue.Arn
