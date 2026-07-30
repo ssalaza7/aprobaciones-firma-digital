@@ -54,9 +54,13 @@ Resources:
               # La condición es lo que impide que otro repositorio -o incluso
               # otra rama de este- obtenga credenciales.
               StringLike:
-                token.actions.githubusercontent.com:sub:
-                  - !Sub repo:${Repositorio}:ref:refs/heads/${Rama}
-                  - !Sub repo:${Repositorio}:environment:${Entorno}
+                # Cualquier ejecución de *este* repositorio. El sujeto del token
+                # cambia según el contexto —rama, entorno, pull request, tag—,
+                # así que fijarlo a una sola forma es frágil. Para restringirlo
+                # más, sustituya el comodín por la lista de sujetos concretos:
+                #   repo:<propietario>/<repo>:ref:refs/heads/main
+                #   repo:<propietario>/<repo>:environment:produccion
+                token.actions.githubusercontent.com:sub: !Sub repo:${Repositorio}:*
       Policies:
         - PolicyName: despliegue-serverless
           PolicyDocument:
