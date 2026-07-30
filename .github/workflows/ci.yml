@@ -4,7 +4,9 @@ name: CI
 # request hacia ellas. Es la puerta que protege a `develop` y a `main`.
 on:
   push:
-    branches: [main, develop]
+    # En `main` no hace falta: el flujo de despliegue ya ejecuta este CI
+    # completo como paso previo, y duplicarlo solo gasta minutos.
+    branches: [develop]
   pull_request:
     branches: [main, develop]
   workflow_dispatch:
@@ -14,7 +16,9 @@ on:
 # Si se empuja dos veces seguidas a la misma rama, cancela la ejecución anterior:
 # no tiene sentido gastar minutos validando un commit ya superado.
 concurrency:
-  group: ci-${{ github.ref }}
+  # Incluye el nombre del flujo: al reutilizarse desde el CD, este grupo
+  # pasa a ser "ci-CD-…" y no cancela una ejecución independiente del CI.
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
