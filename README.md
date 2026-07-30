@@ -434,13 +434,30 @@ Todo el buzón simulado está en `GET /api/mock-mail`.
 
 ## API
 
-Contrato completo en [`docs/openapi.yaml`](docs/openapi.yaml) (OpenAPI 3.0, con
-ejemplos). Para verlo en Swagger UI:
+Contrato completo en [`docs/openapi.yaml`](docs/openapi.yaml): OpenAPI 3.0 con
+ejemplos por operación, los servidores de prueba y una sección **Cómo probar**
+dentro del propio documento.
+
+**La forma más rápida de verificarla** es el script de extremo a extremo, que
+recorre el flujo completo y comprueba cada paso:
+
+```bash
+./docs/probar-api.sh
+```
+
+Sin argumentos apunta a la API desplegada; con uno, a donde se le indique
+(`./docs/probar-api.sh http://localhost:4000`). Crea una solicitud, comprueba
+que un OTP incorrecto devuelve 401, registra las tres firmas, verifica la cadena
+de hashes y descarga el PDF. Solo necesita `curl` y `python3`.
+
+Para explorarla a mano, en Swagger UI:
 
 ```bash
 docker run --rm -p 8080:8080 -e SWAGGER_JSON=/api/openapi.yaml \
   -v "$PWD/docs:/api" swaggerapi/swagger-ui
 ```
+
+El mismo archivo se importa tal cual en Postman o Insomnia (*Import → OpenAPI*).
 
 | Método | Ruta | Qué hace |
 |---|---|---|

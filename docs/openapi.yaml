@@ -24,10 +24,55 @@ info:
     autorización del aprobador es la posesión del token del enlace más el OTP.
     Ver la sección "Supuestos" del README.
 
+    ---
+
+    ## Cómo probar
+
+    **Opción 1 — script de extremo a extremo (lo más rápido).** Recorre el flujo
+    completo y comprueba cada paso; solo necesita `curl` y `python3`:
+
+    ```bash
+    ./docs/probar-api.sh                        # contra la API desplegada
+    ./docs/probar-api.sh http://localhost:4000  # contra la ejecución local
+    ```
+
+    Crea una solicitud, valida el rechazo de un OTP incorrecto, registra las tres
+    firmas, verifica la cadena de hashes y descarga el PDF de evidencia.
+
+    **Opción 2 — Swagger UI.** Este archivo se puede abrir sin instalar nada:
+
+    ```bash
+    docker run --rm -p 8080:8080 -e SWAGGER_JSON=/api/openapi.yaml \
+      -v "$PWD/docs:/api" swaggerapi/swagger-ui
+    ```
+
+    También se importa tal cual en Postman o Insomnia (*Import → OpenAPI*).
+
+    **Opción 3 — a mano.** El orden importa: los endpoints de aprobación exigen
+    un `approver_token` que solo existe tras crear la solicitud, y la decisión
+    exige el `tokenSesion` que devuelve la validación del OTP. Los ejemplos de
+    cada operación traen cuerpos listos para copiar.
+
+    ### El dato que hay que ir arrastrando
+
+    | Paso | Devuelve | Se usa en |
+    |---|---|---|
+    | Crear solicitud | `solicitud.id` y un `approver_token` por aprobador | todos los pasos siguientes |
+    | Solicitar OTP | `otpDemo` (solo si `EXPONER_OTP=true`) | validar el OTP |
+    | Validar OTP | `tokenSesion`, válido 15 minutos | registrar la decisión |
+
+    Si `otpDemo` llega vacío, el código está en el buzón simulado:
+    `GET /api/mock-mail?solicitud_id={id}`.
+
+    **Atajo útil:** la respuesta de creación incluye `enlacesAprobacion` con los
+    tres enlaces completos, así no hace falta abrir el buzón para empezar.
+
   contact:
     name: Prueba técnica
 
 servers:
+  - url: https://gt8jx5d8dk.execute-api.us-east-1.amazonaws.com/dev
+    description: Despliegue de prueba (AWS · us-east-1)
   - url: http://localhost:4000
     description: Ejecución local
   - url: https://{idApi}.execute-api.{region}.amazonaws.com/{etapa}
