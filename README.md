@@ -35,14 +35,15 @@ stack está desplegado con `ExponerOtp=true`.
 
 1. [Qué hace, en concreto](#qué-hace-en-concreto)
 2. [Firmas concatenadas](#firmas-concatenadas)
-3. [Arquitectura](#arquitectura) · [diagramas](docs/arquitectura.md)
-4. [Cómo ejecutarlo](#cómo-ejecutarlo)
-5. [Cómo probar el flujo completo](#cómo-probar-el-flujo-completo)
-6. [API](#api)
-7. [Pruebas](#pruebas)
-8. [Despliegue en AWS](#despliegue-en-aws)
-9. [Supuestos y decisiones](#supuestos-y-decisiones)
-10. [Qué no está incluido](#qué-no-está-incluido)
+3. [Arquitectura](#arquitectura) — diagramas de componentes y hexagonal
+4. [Flujo completo, paso a paso](#flujo-completo-paso-a-paso) — diagrama de secuencia
+5. [Cómo ejecutarlo](#cómo-ejecutarlo)
+6. [Cómo probar el flujo completo](#cómo-probar-el-flujo-completo)
+7. [API](#api)
+8. [Pruebas](#pruebas)
+9. [Despliegue en AWS](#despliegue-en-aws)
+10. [Supuestos y decisiones](#supuestos-y-decisiones)
+11. [Qué no está incluido](#qué-no-está-incluido)
 
 ---
 
@@ -97,6 +98,27 @@ Consecuencias prácticas:
   evidencia lo delata.
 - **El orden de firma queda registrado** y es verificable, no solo la fecha.
 
+```mermaid
+flowchart LR
+    contenido["Contenido de la solicitud<br/><i>id · título · descripción<br/>monto · solicitante · fecha</i>"]
+    semilla(["<b>semilla</b><br/>SHA-256"])
+    f1(["<b>firma 1</b><br/>Jefe de Área"])
+    f2(["<b>firma 2</b><br/>Finanzas"])
+    f3(["<b>firma 3</b><br/>Gerencia"])
+    pdf["PDF de evidencia<br/><i>imprime la cadena<br/>y la verifica</i>"]
+
+    contenido --> semilla
+    semilla -->|"hash anterior"| f1
+    f1 -->|"hash anterior"| f2
+    f2 -->|"hash anterior"| f3
+    f3 --> pdf
+
+    classDef ancla fill:#eaf0ff,stroke:#1d4ed8,color:#12203a
+    classDef firma fill:#e6f5ec,stroke:#116b3a,color:#12203a,stroke-width:2px
+    class contenido,semilla ancla
+    class f1,f2,f3 firma
+```
+
 El PDF imprime la cadena completa y declara si la verificación pasó. Ese
 comportamiento está cubierto por pruebas: ver
 [`Solicitud.test.ts`](backend/test/domain/Solicitud.test.ts) ("detecta la
@@ -112,11 +134,53 @@ de modo que el modelo no importa `node:crypto`.
 
 ## Arquitectura
 
-> **Diagramas:** [`docs/arquitectura.md`](docs/arquitectura.md) contiene el
-> diagrama de componentes, el de arquitectura hexagonal, el de secuencia del
-> flujo completo y el de la cadena de firmas. GitHub los renderiza en línea.
+### Diagrama de componentes
+
+Qué piezas existen desplegadas y cómo se comunican.
+
+```mermaid
+flowchart TB
+    subgraph navegador["Navegador"]
+        host["Host :3000<br/><i>contenedor, rutas y layout</i>"]
+        mfs["mf-solicitante :3001<br/><i>crear, panel y detalle</i>"]
+        mfa["mf-aprobador :3002<br/><i>OTP, detalle y decisión</i>"]
+        host -. "Module Federation<br/>(carga en ejecución)" .-> mfs
+        host -. "Module Federation" .-> mfa
+    end
+
+    subgraph aws["AWS"]
+        s3web["S3 · sitio estático<br/><i>bundles de los 3 paquetes</i>"]
+        apigw["API Gateway<br/><i>HTTP API</i>"]
+        lambda["Lambda<br/><i>aprobaciones-api</i>"]
+        dynamo[("DynamoDB<br/><i>tabla única</i>")]
+        s3pdf[("S3<br/><i>evidencias PDF</i>")]
+    end
+
+    s3web -- "descarga inicial" --> navegador
+    mfs -- "REST · axios" --> apigw
+    mfa -- "REST · axios" --> apigw
+    apigw -- "proxy ANY /{proxy+}" --> lambda
+    lambda -- "solicitudes, tokens<br/>y buzón simulado" --> dynamo
+    lambda -- "guarda y lee<br/>el PDF" --> s3pdf
+
+    classDef front fill:#eaf0ff,stroke:#1d4ed8,color:#12203a
+    classDef cloud fill:#fdf5e0,stroke:#8a6d1f,color:#12203a
+    classDef datos fill:#e6f5ec,stroke:#116b3a,color:#12203a
+    class host,mfs,mfa front
+    class apigw,lambda,s3web cloud
+    class dynamo,s3pdf datos
+```
+
+El bucket de evidencias es **privado**: el PDF no se descarga de S3 sino a través
+de la API, que es quien decide si puede entregarse. Los microfrontends se cargan
+en **tiempo de ejecución**, no en compilación: el host solo conoce la URL del
+`remoteEntry.js` de cada remoto.
 
 ### Backend: hexagonal (puertos y adaptadores)
+
+<p align="center">
+  <img src="docs/arquitectura-hexagonal.svg" alt="Arquitectura hexagonal: dominio, aplicación e infraestructura en hexágonos concéntricos" width="820">
+</p>
 
 ```
 backend/src/
@@ -179,6 +243,89 @@ Dos decisiones que vale la pena señalar:
 Si un remoto no está disponible, el host no se queda en blanco: un límite de error
 lo aísla y explica cuál módulo falló
 ([`remotos.tsx`](frontend/packages/host/src/remotos.tsx)).
+
+---
+
+## Flujo completo, paso a paso
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor SOL as Solicitante
+    participant FE as Frontend
+    participant API as API<br/>(Lambda)
+    participant DOM as Solicitud<br/>(agregado)
+    participant DB as DynamoDB
+    participant MAIL as Correo<br/>(simulado)
+    participant S3 as S3
+    actor APR as Aprobador
+
+    rect rgb(234, 240, 255)
+    note over SOL, MAIL: Alta de la solicitud
+    SOL->>FE: título, descripción, monto y 3 aprobadores
+    FE->>API: POST /api/solicitudes
+    API->>DOM: crear
+    DOM-->>API: valida 3 roles distintos,<br/>monto y correos
+    API->>DB: transacción: solicitud + 3 índices de token
+    API->>MAIL: 3 correos con enlace único
+    API-->>FE: 201 · estado PENDIENTE
+    end
+
+    rect rgb(253, 245, 224)
+    note over APR, DB: Verificación por OTP (se repite por aprobador)
+    APR->>FE: abre /approve?solicitud_id&approver_token
+    FE->>API: POST /api/aprobaciones/otp
+    API->>DOM: emitirOtp
+    API->>DB: guarda OTP (vigencia 3 min)
+    API->>MAIL: código de un solo uso
+    APR->>FE: ingresa el código
+    FE->>API: POST /api/aprobaciones/otp/validar
+    API->>DOM: verificarOtp
+    alt código correcto
+        DOM-->>API: abre sesión (15 min)
+        API-->>FE: detalle de la compra + tokenSesion
+    else incorrecto o vencido
+        API->>DB: persiste el intento fallido
+        API-->>FE: 401 · motivo INCORRECTO / EXPIRADO
+    end
+    end
+
+    rect rgb(230, 245, 236)
+    note over APR, S3: Decisión y cierre
+    APR->>FE: Aprobar o Rechazar
+    FE->>API: POST /api/aprobaciones/decision
+    alt aprueba
+        API->>DOM: registrarFirma
+        DOM-->>DOM: encadena SHA-256<br/>de la firma anterior
+        API->>DB: guarda con bloqueo optimista
+        alt es la tercera firma
+            API->>DOM: verificarCadenaFirmas
+            API->>S3: guarda el PDF de evidencia
+            API->>DB: estado COMPLETADA
+        end
+    else rechaza
+        API->>DOM: registrarRechazo
+        API->>DB: estado RECHAZADA · flujo cerrado
+    end
+    API->>MAIL: avisa al solicitante
+    API-->>FE: estado actualizado
+    end
+
+    SOL->>FE: Descargar PDF
+    FE->>API: GET /api/solicitudes/{id}/evidencia.pdf
+    API->>S3: lee el objeto
+    API-->>SOL: application/pdf
+```
+
+Cuatro detalles que el diagrama hace explícitos:
+
+- El **OTP autentica una sola vez**; lo que autoriza la decisión es el
+  `tokenSesion` que se emite al validarlo. El código nunca viaja en la firma.
+- Los **intentos fallidos se persisten**, para que el bloqueo a los cinco
+  intentos no se pueda esquivar reintentando.
+- La firma se guarda **antes** de generar el PDF. Si la generación falla, la
+  firma no se pierde: la evidencia se reintenta en la primera descarga.
+- El **rechazo de uno cierra el flujo** para los demás.
 
 ---
 
