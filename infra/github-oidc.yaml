@@ -16,14 +16,6 @@ Parameters:
     Type: String
     Default: main
     Description: Única rama desde la que se permite desplegar.
-  Entorno:
-    Type: String
-    Default: produccion
-    Description: >
-      Nombre del environment de GitHub usado por el flujo de despliegue. Cuando
-      un job declara `environment:`, GitHub cambia el sujeto del token OIDC de
-      `ref:refs/heads/<rama>` a `environment:<nombre>`, así que la política de
-      confianza tiene que contemplar ambas formas.
 
 Resources:
   ProveedorGitHub:
@@ -51,16 +43,23 @@ Resources:
             Condition:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
-              # La condición es lo que impide que otro repositorio -o incluso
-              # otra rama de este- obtenga credenciales.
+                # La restricción de fondo va sobre estas dos reclamaciones, que
+                # llegan siempre en formato estable: este repositorio y esta rama.
+                token.actions.githubusercontent.com:repository: !Ref Repositorio
+                token.actions.githubusercontent.com:ref: !Sub refs/heads/${Rama}
               StringLike:
-                # Cualquier ejecución de *este* repositorio. El sujeto del token
-                # cambia según el contexto —rama, entorno, pull request, tag—,
-                # así que fijarlo a una sola forma es frágil. Para restringirlo
-                # más, sustituya el comodín por la lista de sujetos concretos:
-                #   repo:<propietario>/<repo>:ref:refs/heads/main
-                #   repo:<propietario>/<repo>:environment:produccion
-                token.actions.githubusercontent.com:sub: !Sub repo:${Repositorio}:*
+                # IAM obliga además a condicionar sobre `sub`. GitHub lo emite
+                # en dos formatos —por nombre, o inmutable con el id numérico
+                # del propietario y del repositorio incrustado
+                # (repo:usuario@49240031/repo@1315501885:...)—, así que se
+                # contemplan ambos. Un nombre de usuario no puede contener "@",
+                # de modo que el comodín no abre la puerta a otra cuenta.
+                token.actions.githubusercontent.com:sub:
+                  - !Sub repo:${Repositorio}:*
+                  - !Sub
+                    - repo:${Propietario}@*/${Nombre}@*:*
+                    - Propietario: !Select [0, !Split ['/', !Ref Repositorio]]
+                      Nombre: !Select [1, !Split ['/', !Ref Repositorio]]
       Policies:
         - PolicyName: despliegue-serverless
           PolicyDocument:
