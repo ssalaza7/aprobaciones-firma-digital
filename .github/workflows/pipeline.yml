@@ -2,7 +2,9 @@ name: CI/CD pipeline
 
 # Título de cada ejecución: un único nombre con su número correlativo,
 # "CI/CD pipeline #1", "#2"… en lugar del mensaje del commit.
-run-name: CI/CD pipeline #${{ github.run_number }}
+# Entre comillas: sin ellas, YAML interpreta la almohadilla como
+# comienzo de comentario y el número desaparece del título.
+run-name: "CI/CD pipeline #${{ github.run_number }}"
 
 # Un solo flujo para integración y despliegue: así la numeración es continua y
 # no hay dos historiales paralelos que cuadrar.
