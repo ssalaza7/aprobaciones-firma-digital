@@ -35,7 +35,7 @@ stack está desplegado con `ExponerOtp=true`.
 
 1. [Qué hace, en concreto](#qué-hace-en-concreto)
 2. [Firmas concatenadas](#firmas-concatenadas)
-3. [Arquitectura](#arquitectura)
+3. [Arquitectura](#arquitectura) · [diagramas](docs/arquitectura.md)
 4. [Cómo ejecutarlo](#cómo-ejecutarlo)
 5. [Cómo probar el flujo completo](#cómo-probar-el-flujo-completo)
 6. [API](#api)
@@ -111,6 +111,10 @@ de modo que el modelo no importa `node:crypto`.
 ---
 
 ## Arquitectura
+
+> **Diagramas:** [`docs/arquitectura.md`](docs/arquitectura.md) contiene el
+> diagrama de componentes, el de arquitectura hexagonal, el de secuencia del
+> flujo completo y el de la cadena de firmas. GitHub los renderiza en línea.
 
 ### Backend: hexagonal (puertos y adaptadores)
 
