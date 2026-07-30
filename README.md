@@ -595,33 +595,63 @@ latencia y una segunda fuente de verdad del estado, que ya vive en el agregado.
 
 ## Integración y despliegue continuos
 
-El repositorio sigue **Gitflow** —`main` es producción, `develop` integración, y
-las ramas `feature/`, `release/` y `hotfix/` son temporales— con dos flujos de
-GitHub Actions. El detalle del modelo de ramas y del ciclo completo está en
+### Gitflow
+
+| Rama | Vida | Para qué |
+|---|---|---|
+| `main` | permanente | Refleja **producción**. Cada commit aquí es una versión desplegada y etiquetada. |
+| `develop` | permanente | Rama de **integración**, donde se acumula lo terminado. |
+| `feature/*` | temporal | Una funcionalidad. De `develop` a `develop`. |
+| `release/*` | temporal | Preparación de una versión. De `develop` a `main`. |
+| `hotfix/*` | temporal | Corrección urgente. De `main` a `main` **y** a `develop`. |
+
+`main` está protegida: exige pull request con el pipeline en verde, y no admite
+force-push ni borrado. La entrega está etiquetada como
+[**v1.0.0**](https://github.com/ssalaza7/aprobaciones-firma-digital/releases/tag/v1.0.0).
+El ciclo completo, con sus comandos y el diagrama de ramas, está en
 [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
-Todo vive en un **único flujo** ([`pipeline.yml`](.github/workflows/pipeline.yml)),
-de modo que cada ejecución lleva un solo nombre y un número correlativo
-—`CI/CD pipeline #1`, `#2`…— en lugar de dos historiales paralelos.
+### Un solo pipeline
 
-**Integración** — en cada push a `main` o `develop` y en cada pull request:
+Integración y despliegue viven en el mismo flujo
+([`pipeline.yml`](.github/workflows/pipeline.yml)), de modo que cada ejecución
+lleva un único nombre y una numeración continua —`CI/CD pipeline #1`, `#2`…— en
+lugar de dos historiales paralelos que cuadrar.
+
+**Verificación** — en cada push a `main` o `develop` y en cada pull request,
+tres trabajos en paralelo:
 
 | Trabajo | Qué comprueba |
 |---|---|
-| Backend | Tipos, 204 pruebas y umbral de cobertura, con **DynamoDB Local** como servicio para que las pruebas del adaptador se ejecuten de verdad |
+| Backend | Tipos, 204 pruebas y umbral de cobertura, con **DynamoDB Local** como servicio: las pruebas de integración del adaptador se ejecutan de verdad, no se omiten |
 | Frontend | Tipos, 66 pruebas, cobertura y que los **tres bundles** de Module Federation compilen |
 | Infraestructura | `sam validate --lint` sobre la plantilla |
 
-**Despliegue** — el trabajo `desplegar` se activa solo al integrar en `main`, y
+Los umbrales viven en los `jest.config.js`, no en el workflow: si la cobertura
+baja del 60 % global —o del 90 % en dominio y aplicación—, las pruebas fallan
+solas, igual en CI que en local.
+
+**Despliegue** — el trabajo `desplegar` se activa solo al integrar en `main` y
 únicamente si los tres anteriores pasaron. Despliega la API con SAM, compila los
 microfrontends contra la URL real que devuelve el stack, los publica en S3 y
-**verifica que lo desplegado responde**: si `/api/salud` o el frontend no
-devuelven 200, el despliegue falla.
+comprueba que lo desplegado responde: si `/api/salud` o el frontend no devuelven
+200, el despliegue se marca como fallido.
 
-No hay llaves de AWS en el repositorio: la autenticación es por **OIDC**, con un
-rol ([`infra/github-oidc.yaml`](infra/github-oidc.yaml)) que solo se puede
-asumir desde este repositorio y desde `main`, y con permisos acotados a los
-servicios del stack en lugar de `AdministratorAccess`.
+### Autenticación sin secretos
+
+No hay llaves de AWS en el repositorio. Se usa **OIDC**: GitHub emite un token
+firmado en cada ejecución y AWS entrega credenciales temporales solo si procede
+de este repositorio y de `main`. El rol lo crea
+[`infra/github-oidc.yaml`](infra/github-oidc.yaml), con permisos acotados a los
+servicios del stack —no `AdministratorAccess`— y capaz de administrar únicamente
+los roles cuyo nombre empieza por `aprobaciones-`.
+
+Un detalle que costó encontrar y que la documentación habitual no recoge: GitHub
+puede emitir el sujeto del token en **formato inmutable**, con el identificador
+numérico del propietario y del repositorio incrustado
+(`repo:usuario@49240031/repo@1315501885:...`). Cualquier política de confianza
+escrita sobre nombres deja de coincidir. La de este proyecto restringe por las
+reclamaciones `repository` y `ref`, que llegan en formato estable.
 
 ---
 
@@ -674,6 +704,10 @@ Por alcance, no por olvido:
   es escribir un adaptador de `NotificadorPort` con SES; los casos de uso no se
   tocan.
 - **CloudFront delante del frontend** (pendiente de que AWS verifique la cuenta).
+- **Comprobación de CORS en el pipeline.** Hoy verifica que la API y el frontend
+  respondan 200, pero eso no detecta un origen mal configurado: CORS lo aplica el
+  navegador, no `curl`. Ya provocó un fallo real —el frontend desplegado no podía
+  llamar a la API— que se corrigió fijando el origen en `samconfig.toml`.
 - **Firma criptográfica con certificados** (PKI, X.509, sellado de tiempo
   cualificado). La cadena SHA-256 da integridad y orden verificables, que es lo
   que el ejercicio pide; no equivale a una firma electrónica cualificada.
