@@ -1,7 +1,6 @@
 # Flujo de aprobaciones con firma digital concatenada
 
-[![CI](https://github.com/ssalaza7/aprobaciones-firma-digital/actions/workflows/ci.yml/badge.svg)](https://github.com/ssalaza7/aprobaciones-firma-digital/actions/workflows/ci.yml)
-[![CD](https://github.com/ssalaza7/aprobaciones-firma-digital/actions/workflows/cd.yml/badge.svg)](https://github.com/ssalaza7/aprobaciones-firma-digital/actions/workflows/cd.yml)
+[![CI/CD pipeline](https://github.com/ssalaza7/aprobaciones-firma-digital/actions/workflows/pipeline.yml/badge.svg)](https://github.com/ssalaza7/aprobaciones-firma-digital/actions/workflows/pipeline.yml)
 
 Aplicación web donde un **solicitante** crea una solicitud de compra y tres
 **aprobadores** de roles distintos la firman —cada uno validando su identidad con
@@ -601,8 +600,11 @@ las ramas `feature/`, `release/` y `hotfix/` son temporales— con dos flujos de
 GitHub Actions. El detalle del modelo de ramas y del ciclo completo está en
 [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
-**CI** ([`ci.yml`](.github/workflows/ci.yml)) — en cada push a `main` o
-`develop` y en cada pull request hacia ellas:
+Todo vive en un **único flujo** ([`pipeline.yml`](.github/workflows/pipeline.yml)),
+de modo que cada ejecución lleva un solo nombre y un número correlativo
+—`CI/CD pipeline #1`, `#2`…— en lugar de dos historiales paralelos.
+
+**Integración** — en cada push a `main` o `develop` y en cada pull request:
 
 | Trabajo | Qué comprueba |
 |---|---|
@@ -610,10 +612,11 @@ GitHub Actions. El detalle del modelo de ramas y del ciclo completo está en
 | Frontend | Tipos, 66 pruebas, cobertura y que los **tres bundles** de Module Federation compilen |
 | Infraestructura | `sam validate --lint` sobre la plantilla |
 
-**CD** ([`cd.yml`](.github/workflows/cd.yml)) — al fusionar en `main`: repite el
-CI, despliega la API con SAM, compila los microfrontends contra la URL real que
-devuelve el stack, los publica en S3 y **verifica que lo desplegado responde**.
-Si `/api/salud` o el frontend no devuelven 200, el despliegue falla.
+**Despliegue** — el trabajo `desplegar` se activa solo al integrar en `main`, y
+únicamente si los tres anteriores pasaron. Despliega la API con SAM, compila los
+microfrontends contra la URL real que devuelve el stack, los publica en S3 y
+**verifica que lo desplegado responde**: si `/api/salud` o el frontend no
+devuelven 200, el despliegue falla.
 
 No hay llaves de AWS en el repositorio: la autenticación es por **OIDC**, con un
 rol ([`infra/github-oidc.yaml`](infra/github-oidc.yaml)) que solo se puede

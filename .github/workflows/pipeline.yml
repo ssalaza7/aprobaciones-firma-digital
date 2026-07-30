@@ -1,0 +1,243 @@
+name: CI/CD pipeline
+
+# Título de cada ejecución: un único nombre con su número correlativo,
+# "CI/CD pipeline #1", "#2"… en lugar del mensaje del commit.
+run-name: CI/CD pipeline #${{ github.run_number }}
+
+# Un solo flujo para integración y despliegue: así la numeración es continua y
+# no hay dos historiales paralelos que cuadrar.
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+concurrency:
+  group: pipeline-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  # Necesario para que GitHub emita el token OIDC con el que se asume el rol.
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  STACK_API: aprobaciones-firma-digital
+  STACK_FRONTEND: aprobaciones-frontend
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Integración: se ejecuta siempre, en cualquier rama y en cada pull request.
+  # ---------------------------------------------------------------------------
+  backend:
+    name: Backend · tipos, pruebas y cobertura
+    runs-on: ubuntu-latest
+
+    # DynamoDB Local como servicio: así las pruebas de integración del
+    # adaptador se ejecutan de verdad en CI y no se omiten.
+    services:
+      dynamodb:
+        image: amazon/dynamodb-local:2.5.2
+        ports: ['8000:8000']
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Verificar tipos
+        run: npm run typecheck
+
+      - name: Preparar la tabla de DynamoDB
+        run: npm run tabla:local
+        env:
+          DYNAMO_ENDPOINT: http://localhost:8000
+          AWS_REGION: us-east-1
+
+      - name: Pruebas con cobertura
+        # El umbral vive en jest.config.js: 60 % global y 90 % en dominio y
+        # aplicación. Si la cobertura baja, este paso falla solo.
+        run: npm run test:cobertura
+        env:
+          DYNAMO_ENDPOINT: http://localhost:8000
+          TABLA_DYNAMO: aprobaciones
+          AWS_REGION: us-east-1
+
+      - name: Compilar
+        run: npm run build
+
+      - name: Publicar el reporte de cobertura
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cobertura-backend
+          path: backend/coverage/
+          retention-days: 7
+
+  frontend:
+    name: Frontend · tipos, pruebas y build de los microfrontends
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Verificar tipos
+        run: npm run typecheck
+
+      - name: Pruebas con cobertura
+        run: npm run test:cobertura
+
+      - name: Compilar host y remotos
+        # Comprueba que los tres bundles de Module Federation se generan; un
+        # error de configuración del host o de un remoto se ve aquí.
+        run: npm run build
+
+      - name: Publicar el reporte de cobertura
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cobertura-frontend
+          path: frontend/coverage/
+          retention-days: 7
+
+  infraestructura:
+    name: Infraestructura · validación de la plantilla SAM
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+
+      - name: Validar la plantilla
+        # Solo comprueba sintaxis y reglas de linting, pero SAM CLI exige una
+        # sesión de AWS resoluble: se le dan credenciales ficticias porque
+        # nunca llega a llamar a la nube.
+        run: sam validate --template infra/template.yaml --lint --region us-east-1
+        env:
+          AWS_ACCESS_KEY_ID: ficticia
+          AWS_SECRET_ACCESS_KEY: ficticia
+          AWS_DEFAULT_REGION: us-east-1
+
+  # ---------------------------------------------------------------------------
+  # Despliegue: solo al integrar en `main`, y solo si la verificación pasó.
+  # En Gitflow, lo que llega a `main` ya pasó por `develop` y por una release.
+  # ---------------------------------------------------------------------------
+  desplegar:
+    name: Desplegar en AWS
+    needs: [backend, frontend, infraestructura]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment: produccion
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+
+      - name: Obtener credenciales temporales por OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          # El ARN del rol es una variable del repositorio, no un secreto: no
+          # sirve de nada sin un token OIDC de este repositorio y esta rama.
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: despliegue-${{ github.run_id }}
+
+      - name: Desplegar la API
+        working-directory: infra
+        run: |
+          sam build
+          sam deploy --no-confirm-changeset --no-fail-on-empty-changeset
+
+      - name: Leer las URL de los stacks
+        id: urls
+        run: |
+          API=$(aws cloudformation describe-stacks --stack-name "$STACK_API" \
+            --query "Stacks[0].Outputs[?OutputKey=='UrlApi'].OutputValue" --output text)
+          WEB=$(aws cloudformation describe-stacks --stack-name "$STACK_FRONTEND" \
+            --query "Stacks[0].Outputs[?OutputKey=='UrlFrontend'].OutputValue" --output text)
+          BUCKET=$(aws cloudformation describe-stacks --stack-name "$STACK_FRONTEND" \
+            --query "Stacks[0].Outputs[?OutputKey=='NombreBucketFrontend'].OutputValue" --output text)
+          echo "api=$API"       >> "$GITHUB_OUTPUT"
+          echo "web=$WEB"       >> "$GITHUB_OUTPUT"
+          echo "bucket=$BUCKET" >> "$GITHUB_OUTPUT"
+
+      - name: Compilar los microfrontends contra la API desplegada
+        working-directory: frontend
+        env:
+          API_URL: ${{ steps.urls.outputs.api }}
+          URL_MF_SOLICITANTE: ${{ steps.urls.outputs.web }}/solicitante
+          URL_MF_APROBADOR: ${{ steps.urls.outputs.web }}/aprobador
+        run: |
+          npm ci
+          npm run build
+
+      - name: Publicar el frontend
+        working-directory: frontend
+        env:
+          BUCKET: ${{ steps.urls.outputs.bucket }}
+        run: |
+          aws s3 sync packages/host/dist           "s3://$BUCKET/"             --delete --exclude "solicitante/*" --exclude "aprobador/*"
+          aws s3 sync packages/mf-solicitante/dist "s3://$BUCKET/solicitante/" --delete
+          aws s3 sync packages/mf-aprobador/dist   "s3://$BUCKET/aprobador/"   --delete
+
+      - name: Comprobar que lo desplegado responde
+        env:
+          API: ${{ steps.urls.outputs.api }}
+          WEB: ${{ steps.urls.outputs.web }}
+        run: |
+          set -e
+          echo "Comprobando $API/api/salud"
+          test "$(curl -s -o /dev/null -w '%{http_code}' "$API/api/salud")" = "200"
+          echo "Comprobando $WEB"
+          test "$(curl -s -o /dev/null -w '%{http_code}' "$WEB/")" = "200"
+
+      - name: Resumen del despliegue
+        env:
+          WEB: ${{ steps.urls.outputs.web }}
+        run: |
+          {
+            echo "### Despliegue completado"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Aplicación | $WEB |"
+            echo "| Commit | \`${{ github.sha }}\` |"
+            echo ""
+            echo "Verificado: la API responde y el frontend se sirve."
+          } >> "$GITHUB_STEP_SUMMARY"

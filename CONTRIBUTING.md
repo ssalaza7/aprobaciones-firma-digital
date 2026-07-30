@@ -82,9 +82,11 @@ gh pr create --base main --title "Hotfix: prefijo del stage en Lambda"
 
 ## Integración continua
 
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) se ejecuta en cada push a
-`main` y `develop`, y en cada pull request hacia ellas. Tres trabajos en
-paralelo:
+Integración y despliegue viven en un **único flujo**
+([`.github/workflows/pipeline.yml`](.github/workflows/pipeline.yml)), para que
+cada ejecución tenga un solo nombre y una numeración continua: `CI/CD pipeline #1`,
+`#2`… Se ejecuta en cada push a `main` y `develop`, y en cada pull request hacia
+ellas. Tres trabajos en paralelo:
 
 | Trabajo | Qué comprueba |
 |---|---|
@@ -98,9 +100,10 @@ pruebas fallan solas, en CI y en local por igual.
 
 ## Despliegue continuo
 
-[`.github/workflows/cd.yml`](.github/workflows/cd.yml) se dispara al fusionar en
-`main`. Vuelve a ejecutar el CI completo, despliega la API con SAM, compila los
-microfrontends contra la URL real de la API y los publica en S3. Termina
+El trabajo `desplegar`, dentro del mismo flujo, se activa solo al integrar en
+`main` y únicamente si los tres trabajos de verificación pasaron. Despliega la
+API con SAM, compila los microfrontends contra la URL real de la API y los
+publica en S3. Termina
 comprobando que lo desplegado responde: si `/api/salud` o el frontend no
 devuelven 200, el despliegue se marca como fallido.
 
